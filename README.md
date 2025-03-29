@@ -200,6 +200,140 @@ For better understanding, time diagram is presented
 | ↑   | 1      | 0            | ↑ (0→1)      | 0            | 7         | 10101010       | XX            | 0        | 8th rising edge - bit 7 (LSB)   |
 | ↑   | 1      | 0            | 1            | X            | 0         | 01010100       | AA            | 1        | Byte complete (rx_valid pulse)  |
 | ↑   | 1      | 1            | X            | X            | 0         | 01010100       | AA            | 0        | Chip deselected                 |
+---
+Now, once the data have been well received, it is time to pass to the processing of it.
+
+---
+## vram.v
+This Verilog module implements a double-buffered Video RAM (VRAM) controller designed for display systems. 
+
+```verilog
+module vram#(
+    parameter ADDR_WIDTH = 11,   // 1KB memory
+    parameter DATA_WIDTH = 8    // Byte-wide data
+)
+(
+input wire clk,
+input wire rx_valid,
+input wire [DATA_WIDTH - 1: 0] data_in,
+output reg ready_flag, // Indicates vram is ready to be read from
+input wire read_en, // Vram data reading enable
+output reg [DATA_WIDTH - 1: 0] data_out,
+input wire rst_n,
+input [ADDR_WIDTH - 1 : 0] read_addr
+); 
+	
+	parameter x_size = 40;
+	parameter y_size = 30;
+	
+	parameter addr_size = x_size * y_size;
+	
+	reg rx_valid_prev;
+	wire rx_rising;
+	
+	reg [DATA_WIDTH - 1 : 0] buffer [0 : addr_size - 1];
+	reg [DATA_WIDTH - 1 : 0] ram [0 : addr_size - 1];
+	
+	reg [ADDR_WIDTH : 0] write_ptr;
+	
+	reg full_flag; // Indicates buffer is full 
+```
+
+### Module Parameters
+
+| Parameter     | Default | Description |
+|--------------|---------|-------------|
+| `ADDR_WIDTH` | 11      | Determines addressable space (2^11 = 2048 bytes) |
+| `DATA_WIDTH` | 8       | Data bus width (8-bit bytes) |
+| `x_size`     | 40      | Display width in pixels |
+| `y_size`     | 30      | Display height in pixels |
+| `addr_size`  | 1200    | Calculated total pixels (x_size * y_size) |
+
+### Port Description
+
+| Port          | Direction | Width   | Description |
+|---------------|-----------|---------|-------------|
+| `clk`         | input     | 1       | System clock |
+| `rx_valid`    | input     | 1       | Data valid strobe |
+| `data_in`     | input     | [7:0]   | Input pixel data |
+| `ready_flag`  | output    | 1       | VRAM ready for reading |
+| `read_en`     | input     | 1       | Read enable signal |
+| `data_out`    | output    | [7:0]   | Output pixel data |
+| `rst_n`       | input     | 1       | Active-low reset |
+| `read_addr`   | input     | [10:0]  | Read address |
+
+### Internal Signals
+
+| Signal         | Type     | Description |
+|----------------|----------|-------------|
+| `rx_valid_prev`| reg      | Previous value of rx_valid for edge detection |
+| `rx_rising`    | wire     | Rising edge detect on rx_valid |
+| `buffer`       | reg [ ]  | Input buffer memory |
+| `ram`          | reg [ ]  | Main display memory |
+| `write_ptr`    | reg      | Dual-purpose write pointer |
+| `full_flag`    | reg      | Buffer full indicator |
 
 
+```verilog
+//main logic
+always @(posedge clk) begin
+		if (!rst_n)
+			rx_valid_prev <= 1'b0;
+		else
+			rx_valid_prev <= rx_valid;
+	end
+	
+	assign rx_rising = rx_valid == 1'b1 && rx_valid_prev == 1'b0;
+	
+	// Vram management logic
+	always @(posedge clk) begin
+		if (!rst_n) begin
+			write_ptr <= 0;
+			full_flag <= 0;
+			data_out <= 0;
+			ready_flag <= 0;
+		end else begin
+			// Buffer logic
+			if (rx_rising && !full_flag) begin
+				buffer[write_ptr] <= data_in;
+		
+				if (write_ptr == addr_size - 1) begin
+					full_flag <= 1'b1;
+					write_ptr <= 0; // Will be reused as pointer for vram data writing
+				end else
+					write_ptr <= write_ptr + 1;
+			end
+			
+			// Vram writing logic
+			if (full_flag && !ready_flag) begin
+				ram[write_ptr] <= buffer[write_ptr];
+				
+				if (write_ptr == addr_size - 1)
+					ready_flag <= 1'b1;
+				else
+					write_ptr <= write_ptr + 1;
+			end
+			
+			// Vram reading logic
+			if (ready_flag && read_en) begin
+				data_out <= ram[read_addr];
+			end
+		end
+	end
+	
+endmodule
+```
+**Signal Declarations and Edge Detection**
+The code implements a rising-edge detector for the rx_valid signal using a synchronous flip-flop (rx_valid_prev) and combinatorial logic (rx_rising). This creates a one-clock-cycle pulse when new valid data arrives, crucial for properly timing write operations. The design uses two separate memory arrays: 'buffer' acts as temporary storage for incoming pixels, while 'ram' serves as the stable video memory for display output. The write_ptr register serves dual purposes - tracking buffer writes initially, then switching to RAM writes during buffer transfers.
 
+**Reset Logic**
+The synchronous reset block (triggered by rst_n) initializes all control signals: write_ptr resets to zero, flags (full_flag and ready_flag) clear to indicate empty state, and data_out zeros to prevent undefined outputs. This ensures deterministic startup behavior when the system initializes or recovers from errors.
+
+**Buffer Write Logic**
+During normal operation, each detected rx_rising edge triggers a buffer write at the current write_ptr location. The design automatically increments the pointer and monitors for buffer fullness (when write_ptr reaches addr_size-1). At full capacity, it sets full_flag and resets write_ptr - this flag transition initiates the critical buffer-to-RAM transfer phase while preventing new buffer writes during transfer.
+
+**Memory Transfer Mechanism**
+When full_flag activates, the same write_ptr now indexes both buffer (read side) and ram (write side) in a sequential copy operation. This atomic transfer ensures frame coherency - either a complete frame transfers or none at all. Upon completing the full transfer (write_ptr wraps again), ready_flag asserts, signaling display logic that fresh frame data is available for reading.
+
+**Read Interface Operation**
+The output stage operates when ready_flag is high, using a simple synchronous read: when read_en asserts, the addressed ram content immediately appears on data_out. This single-cycle latency enables real-time pixel streaming for display controllers. The separation of read_addr from write operations eliminates contention and ensures stable output during frame updates.
