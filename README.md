@@ -323,17 +323,126 @@ always @(posedge clk) begin
 	
 endmodule
 ```
-**Signal Declarations and Edge Detection**
+**Signal Declarations and Edge Detection:**
 The code implements a rising-edge detector for the rx_valid signal using a synchronous flip-flop (rx_valid_prev) and combinatorial logic (rx_rising). This creates a one-clock-cycle pulse when new valid data arrives, crucial for properly timing write operations. The design uses two separate memory arrays: 'buffer' acts as temporary storage for incoming pixels, while 'ram' serves as the stable video memory for display output. The write_ptr register serves dual purposes - tracking buffer writes initially, then switching to RAM writes during buffer transfers.
 
-**Reset Logic**
+**Reset Logic:**
 The synchronous reset block (triggered by rst_n) initializes all control signals: write_ptr resets to zero, flags (full_flag and ready_flag) clear to indicate empty state, and data_out zeros to prevent undefined outputs. This ensures deterministic startup behavior when the system initializes or recovers from errors.
 
-**Buffer Write Logic**
+**Buffer Write Logic:**
 During normal operation, each detected rx_rising edge triggers a buffer write at the current write_ptr location. The design automatically increments the pointer and monitors for buffer fullness (when write_ptr reaches addr_size-1). At full capacity, it sets full_flag and resets write_ptr - this flag transition initiates the critical buffer-to-RAM transfer phase while preventing new buffer writes during transfer.
 
-**Memory Transfer Mechanism**
+**Memory Transfer Mechanism:**
 When full_flag activates, the same write_ptr now indexes both buffer (read side) and ram (write side) in a sequential copy operation. This atomic transfer ensures frame coherency - either a complete frame transfers or none at all. Upon completing the full transfer (write_ptr wraps again), ready_flag asserts, signaling display logic that fresh frame data is available for reading.
 
-**Read Interface Operation**
+**Read Interface Operation:**
 The output stage operates when ready_flag is high, using a simple synchronous read: when read_en asserts, the addressed ram content immediately appears on data_out. This single-cycle latency enables real-time pixel streaming for display controllers. The separation of read_addr from write operations eliminates contention and ensures stable output during frame updates.
+
+Now, once that the reading and writing (vram) process is done, it is time to focus on the VGA configuration
+
+## vga_sync
+This Verilog module generates the synchronization signals (hsync and vsync) and timing counters (hcount and vcount) needed to drive a standard 640x480@60Hz VGA display. The following is the breakdown of the code
+
+```verilog
+//module declaration
+module vga_sync (
+    input  wire       clk_25MHz,    // 25 MHz clock input
+    input  wire       reset,        // Active-high asynchronous reset
+    output reg        hsync,        // Horizontal sync pulse
+    output reg        vsync,        // Vertical sync pulse
+    output wire       video_enable, // Active during visible area
+    output reg [9:0]  hcount,       // Horizontal pixel counter (0-799)
+    output reg [9:0]  vcount        // Vertical line counter (0-524)
+);
+```
+
+**Inputs**
+
+**clk_25MHz:** Standard frequency for 640x480@60Hz timing
+
+**reset:** Resets all counters when high
+
+**Outputs:** Synchronization signals (hsync, vsync), counters (hcount, vcount), video_enable 
+
+```verilog
+//Timing parameters
+// Horizontal timing (in pixels)
+localparam H_VISIBLE_AREA = 640;
+localparam H_FRONT_PORCH  = 16;
+localparam H_SYNC_PULSE   = 96;
+localparam H_BACK_PORCH   = 48;
+localparam H_TOTAL        = 800; // Sum of all above
+
+// Vertical timing (in lines)
+localparam V_VISIBLE_AREA = 480;
+localparam V_FRONT_PORCH  = 10;
+localparam V_SYNC_PULSE   = 2;
+localparam V_BACK_PORCH   = 33;
+localparam V_TOTAL        = 525; // Sum of all above
+```
+**Horizontal Timing:**
+
+* **Visible area:** 640 pixels
+
+* **Front porch:** 16 pixels (after visible area, before sync)
+
+* **Sync pulse:** 96 pixels (horizontal retrace)
+
+* **Back porch:** 48 pixels (after sync, before next line)
+
+**Vertical Timing:**
+
+* **Visible area:** 480 lines
+
+* **Front porch:** 10 lines (after frame, before vsync)
+
+* **Sync pulse:** 2 lines (vertical retrace)
+
+* **Back porch:** 33 lines (after vsync, before next frame)
+
+```verilog
+
+//counter logic
+always @(posedge clk_25MHz or posedge reset) begin
+    if (reset) begin
+        hcount <= 0;
+        vcount <= 0;
+    end else begin
+        if (hcount == H_TOTAL - 1) begin
+            hcount <= 0;
+            if (vcount == V_TOTAL - 1)
+                vcount <= 0;
+            else
+                vcount <= vcount + 1;
+        end else begin
+            hcount <= hcount + 1;
+        end
+    end
+end
+```
+The counter logic in this VGA sync module uses two 10-bit registers (hcount and vcount) to track the current horizontal pixel position and vertical line position, respectively, within each video frame. On every rising edge of the 25 MHz clock (or when reset is asserted), the horizontal counter increments until it reaches the end of a line (799 pixels), at which point it resets to 0 and the vertical counter either increments (for a new scanline) or resets to 0 (when reaching the bottom of the frame at line 524). This dual-counter system creates a precise coordinate system that progresses left-to-right and top-to-bottom across the screen, with the horizontal counter advancing every pixel clock and the vertical counter advancing only at the end of each complete line, perfectly synchronizing with the VGA timing requirements for 640x480 resolution at 60Hz refresh rate.
+
+```verilog
+//sync logic and video enable signal
+always @* begin
+    if (hcount >= (H_VISIBLE_AREA + H_FRONT_PORCH) &&
+        hcount < (H_VISIBLE_AREA + H_FRONT_PORCH + H_SYNC_PULSE))
+        hsync = 0; // Active low pulse
+    else
+        hsync = 1;
+end
+
+always @* begin
+    if (vcount >= (V_VISIBLE_AREA + V_FRONT_PORCH) &&
+        vcount < (V_VISIBLE_AREA + V_FRONT_PORCH + V_SYNC_PULSE))
+        vsync = 0; // Active low pulse
+    else
+        vsync = 1;
+end
+
+assign video_enable = (hcount < H_VISIBLE_AREA) && (vcount < V_VISIBLE_AREA);
+```
+
+The sync signal generation creates the critical timing pulses that synchronize the VGA monitor's electron beam with the digital video signal. The horizontal sync (hsync) pulses low for 96 pixels (from pixel 656 to 751) at the end of each scanline to signal the monitor to retrace horizontally, while the vertical sync (vsync) pulses low for 2 lines (from line 490 to 491) at the end of each frame to initiate vertical retrace. These active-low pulses are generated combinatorially by comparing the current hcount and vcount positions against predefined thresholds (visible area + front porch) to determine when to trigger the sync periods, ensuring proper alignment with the monitor's expected timing. The sync signals work in conjunction with the front and back porch periods (blanking intervals) to provide the monitor sufficient time to physically reposition the electron beam between lines and frames.
+
+The video_enable signal is a combinational output that goes high only when the current pixel position (hcount and vcount) falls within the visible screen area (0 ≤ hcount < 640 and 0 ≤ vcount < 480). It acts as a gate to indicate when pixel data should be displayed. The simple AND operation (hcount < 640) && (vcount < 480) ensures the signal updates immediately as counters change, without clock delays
