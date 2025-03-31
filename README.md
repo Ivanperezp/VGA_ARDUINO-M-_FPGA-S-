@@ -1,6 +1,10 @@
 # VIDEO_ARDUINO-M-_FPGA-S-
 This repository contains a method to use an Arduino as a master and a FPGA as a slave in order to transmit video by a VGA port to a monitor by SPI protocol.
-This project is made up by six files: arduino.ino, spiSlave.v, vram.v, main.v, vga_sync.v and top_vga.v, which can be found in this repository. The following is the explanation of each file, starting with the file that sends the data from the arduino and ending with the one that transmit the data to the monitor.
+This project is made up by six files: arduino.ino, spiSlave.v, vram.v, main.v, vga_sync.v and top_vga.v, which can be found in this repository. For better understanding the flow diagram of this project is shown below. 
+
+![Flow diagram](images/FlowDiagram.png)
+
+The following is the explanation of each file, starting with the file that sends the data from the arduino and ending with the one that transmit the data to the monitor. For better understanding the flow diagram of this project 
 
 ---
 ## arduino.ino
@@ -570,4 +574,71 @@ The final assign statements connect the internal color registers (color_r, color
 Finally is time to talk about the principal module, main.v, which combines all modules shown above to accomplish the objective of VGA transmission.
 
 ## main.v
+
+This Verilog module integrates all Verilog files shown above: spiSlave.v, vram.v, vga_sync and top_vga in order to shown on the monitor the data sent from the Arduino (master) 
+
+```verilog
+//Module declaration and parameters
+module main
+(
+	input wire clk,           // FPGA system clock
+   input wire rst_n,         // Active low reset
+   input wire sclk,          // SPI clock from Arduino
+   input wire cs_n,          // Chip select (active low)
+   input wire mosi,           // Master out, slave in
+	output VGA_HS,
+	output VGA_VS,
+	output [2:0] VGA_R,
+	output [2:0] VGA_G,
+	output [1:0] VGA_B,
+	output [7:0] debug
+);
+parameter ADDR_WIDTH = 11;
+
+wire miso;
+wire [7:0] rx_data;
+wire rx_valid;
+wire vram_ready;
+reg read_en;
+wire [7:0] vram_out;
+wire [(ADDR_WIDTH - 1) : 0] r_address;
+```
+The main module begins by defining its input and output ports. It receives the main system clock (clk), an active-low reset signal (rst_n), and standard SPI signals (sclk, cs_n, and mosi) from an external device like an Arduino. It outputs VGA synchronization signals (VGA_HS, VGA_VS) and color signals (VGA_R, VGA_G, VGA_B) to a display. Additionally, it provides an 8-bit debug output to monitor internal data, specifically what's read from the video memory (VRAM). These ports form the interface between the FPGA and external systems (Arduino, display, debugging tools).
+
+The module sets a parameter ADDR_WIDTH = 11, which defines the width of the address bus used to access the VRAM, allowing 2048 memory locations. It also declares internal wires and registers to handle data communication between the submodules. For example, rx_data holds the byte received over SPI, rx_valid indicates when valid data is received, vram_out holds the pixel data read from memory, and r_address specifies which pixel to read. The read_en register is used to enable reading from the VRAM once the system is ready.
+
+```verilog
+spiSlave spiSlave_instance(.clk(clk), .rst_n(rst_n), .sclk(sclk), .cs_n(cs_n), .mosi(mosi), .miso(miso), .rx_data(rx_data), .rx_valid(rx_valid));
+vram vram_instance(.clk(clk), .rx_valid(rx_valid), .data_in(rx_data), .ready_flag(vram_ready), .read_en(read_en), .data_out(vram_out), .rst_n(rst_n), .read_addr(r_address));
+top_vga top_vga_instance(.CLOCK_50(clk), .RESET_n(rst_n), .DATA(vram_out), .VGA_HS(VGA_HS), .VGA_VS(VGA_VS), .VGA_R(VGA_R), .VGA_G(VGA_G), .VGA_B(VGA_B), .r_address(r_address));
+```
+The spiSlave module is instantiated and wired to receive SPI signals (sclk, cs_n, mosi) and deliver received data (rx_data) along with a validity signal (rx_valid). This module acts as a communication bridge, converting serial SPI data from the Arduino into parallel data the FPGA can use. It is synchronized to the system clock and reset using clk and rst_n.
+
+The vram module stores the received data for display. It writes new data when rx_valid is high, and it allows data to be read when read_en is active and vram_ready indicates readiness. Data is stored at internal addresses and accessed via read_addr, which is provided by the VGA controller. The output data_out contains the pixel value read from memory, which is routed to the VGA driver for display.
+
+The top_vga module handles the video generation logic, taking in the current pixel data (DATA) and producing the appropriate VGA output signals (VGA_HS, VGA_VS, VGA_R, VGA_G, VGA_B). It also generates the memory address (r_address) indicating which pixel data should be read from VRAM at any given time. This module converts the internal memory representation into visible output for a monitor. Synchronization of VGA signals is in charge of vga_sync.v
+
+```verilog
+//Debug and control logic for VRAM reading
+assign debug = vram_out;
+
+always @(posedge clk) begin
+	if (!rst_n) 
+		read_en <= 1'b0;
+	
+	// Start reading from vram
+	if (vram_ready) begin
+		read_en <= 1'b1;
+	end
+end
+
+endmodule
+```
+The line assign debug = vram_out; connects the VRAM output directly to the debug port. This is useful for troubleshooting or monitoring the actual data being sent to the screen, especially during development. connect or no connect this port does not affect the operation of this project.
+
+The final always block defines a simple control mechanism: when the system is reset (!rst_n), reading from VRAM is disabled (read_en = 0). Once vram_ready is asserted, the system enables reading from VRAM by setting read_en = 1. This ensures that the VGA display logic only starts fetching data when the VRAM is fully initialized and ready to be read, avoiding visual glitches or undefined behavior.
+
+
+
+
 
