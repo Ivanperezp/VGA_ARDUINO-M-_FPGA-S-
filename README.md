@@ -575,7 +575,7 @@ Finally is time to talk about the principal module, main.v, which combines all m
 
 ## main.v
 
-This Verilog module integrates all Verilog files shown above: spiSlave.v, vram.v, vga_sync and top_vga in order to shown on the monitor the data sent from the Arduino (master) 
+This Verilog module integrates all Verilog files shown above: spiSlave.v, vram.v, vga_sync and top_vga in order to show on the monitor the data sent from the Arduino (master) 
 
 ```verilog
 //Module declaration and parameters
