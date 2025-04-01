@@ -4,7 +4,7 @@ This project is made up by six files: arduino.ino, spiSlave.v, vram.v, main.v, v
 
 ![Flow diagram](images/FlowDiagram.png)
 
-The following is the explanation of each file, starting with the file that sends the data from the arduino and ending with the one that transmit the data to the monitor. For better understanding the flow diagram of this project 
+The following is the explanation of each file, starting with the file that sends the data from the arduino and ending with the one that transmit the data to the monitor. 
 
 ---
 ## arduino.ino
