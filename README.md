@@ -639,7 +639,7 @@ The line assign debug = vram_out; connects the VRAM output directly to the debug
 The final always block defines a simple control mechanism: when the system is reset (!rst_n), reading from VRAM is disabled (read_en = 0). Once vram_ready is asserted, the system enables reading from VRAM by setting read_en = 1. This ensures that the VGA display logic only starts fetching data when the VRAM is fully initialized and ready to be read, avoiding visual glitches or undefined behavior.
 
 
-# Pins assigments and physical implementation
+# Pins assignments and physical implementation
 In this project an Arduino uno was used as Master and a FPGA DE0-CV as a slave. An image of pin planner is shown below
 
 ![Pins_assigments](images/pin_assigments.jpg)
