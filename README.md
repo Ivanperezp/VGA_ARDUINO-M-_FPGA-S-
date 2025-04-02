@@ -98,7 +98,7 @@ module spiSlave (
 
 * rx_valid: Flag indicating when new data is available in rx_data
 
-It is important to note that the SCLK and CLK clocks are different, the former is associated with SPI communication, while the latter is the internal clock of the FPGA (50 MHz). In order to avoid instabilities, it is crucial that a clock synchronisation process is performed so that the SPI clock enters the FPGA clock domain. The following is the explanation of the synchronization process.
+It is important to note that the SCLK and CLK clocks are different, the former is associated with SPI communication, while the latter is the internal clock of the FPGA (50 MHz). In order to avoid instabilities, it is crucial that a clock synchronization process is performed so that the SPI clock enters the FPGA clock domain. The following is the explanation of the synchronization process.
 
 ```verilog
 // Synchronization registers
