@@ -646,3 +646,9 @@ In this project an Arduino uno was used as Master and a FPGA DE0-CV as a slave. 
 
 ![Pins_assigments](images/pin_assigments.jpg)
 
+In this specific case, the file `image_to_spi_array.py` can obtain the 332RGB coded equivalent of each pixel in an image, and can also organize that information in the form of a matrix in order to transfer the data by means of SPI.transfer(). This file receives the path of an image as input and returns a 40x30 matrix with the RGB value of each pixel in hexadecimal. It was implemented in order to send an specific bit pattern. The model image and the result show on the monitor is shown below. Result has a poor resolution because of the dimentions choosen (640*480)
+
+![model_image](images/model_image.jpeg)
+Model image
+![result](images/result_monitor.jpg)
+Result shown on the monitor
